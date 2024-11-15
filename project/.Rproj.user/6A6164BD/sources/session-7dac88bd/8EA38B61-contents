@@ -1,0 +1,72 @@
+set.seed(123) 
+
+n <- 10000
+
+edad <- rnorm(n, mean = 35, sd = 10) 
+ingreso <- rnorm(n, mean = 50000, sd = 15000)
+genero <- sample(c("Hombre", "Mujer"), n, replace = TRUE)
+visitas_web <- rpois(n, lambda = 5) 
+
+compro <- rbinom(n, 1, prob = plogis(-3 + 0.03 * edad + 0.00002 * ingreso + 0.2 * visitas_web))
+
+datos <- data.frame(edad, ingreso, genero, visitas_web, compro)
+
+datos$genero <- as.factor(datos$genero)
+
+library(caret)
+set.seed(123)
+trainIndex <- createDataPartition(datos$compro, p = 0.7, list = FALSE)
+datos_entrenamiento <- datos[trainIndex,]
+datos_prueba <- datos[-trainIndex,]
+
+library(randomForest)
+library(rpart)
+
+datos_entrenamiento$compro <- as.factor(datos_entrenamiento$compro)
+datos_prueba$compro <- as.factor(datos_prueba$compro)
+
+log_model <- glm(compro ~ ., data = datos_entrenamiento, family = binomial)
+
+rf_model <- randomForest(compro ~ ., data = datos_entrenamiento)
+
+tree_model <- rpart(compro ~ ., data = datos_entrenamiento, method = "class")
+
+library(pROC)
+
+log_pred <- predict(log_model, datos_prueba, type = "response")
+log_roc <- roc(datos_prueba$compro, log_pred)
+log_auc <- auc(log_roc)
+
+rf_pred <- predict(rf_model, datos_prueba, type = "prob")[,2]
+rf_roc <- roc(datos_prueba$compro, rf_pred)
+rf_auc <- auc(rf_roc)
+
+tree_pred <- predict(tree_model, datos_prueba, type = "prob")[,2]
+tree_roc <- roc(datos_prueba$compro, tree_pred)
+tree_auc <- auc(tree_roc)
+
+model_aucs <- data.frame(
+  Modelo = c("Regresión Logística", "Random Forest", "Árbol de Decisión"),
+  AUC = c(log_auc, rf_auc, tree_auc)
+)
+print(model_aucs)
+
+plot(log_roc, col = "blue", main = "Comparación de Curvas ROC")
+plot(rf_roc, col = "purple", add = TRUE)
+plot(tree_roc, col = "orange", add = TRUE)
+legend("bottomright", legend = model_aucs$Modelo, col = c("blue", "purple", "orange"), lwd = 2)
+
+library(ggplot2)
+
+auc_values <- data.frame(
+  Modelo = c("Regresión Logística", "Random Forest", "Árbol de Decisión"),
+  AUC = c(log_auc, rf_auc, tree_auc)
+)
+
+ggplot(auc_values, aes(x = Modelo, y = AUC, fill = Modelo)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Comparación de AUC entre Modelos",
+       x = "Modelo",
+       y = "AUC") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))

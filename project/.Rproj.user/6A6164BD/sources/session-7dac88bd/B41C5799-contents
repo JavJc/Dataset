@@ -1,0 +1,87 @@
+set.seed(123)
+
+n <- 10000
+edad <- rnorm(n, mean = 35, sd = 10)
+ingreso <- rnorm(n, mean = 50000, sd = 15000)
+genero <- sample(c("Hombre", "Mujer"), n, replace = TRUE)
+visitas_web <- rpois(n, lambda = 5)
+
+compro <- rbinom(n, 1, prob = plogis(-3 + 0.03 * edad + 0.00002 * ingreso + 0.2 * visitas_web))
+
+datos <- data.frame(edad, ingreso, genero, visitas_web, compro)
+datos$genero <- as.factor(datos$genero)
+
+library(caret)
+set.seed(123)
+trainIndex <- createDataPartition(datos$compro, p = 0.7, list = FALSE)
+datos_entrenamiento <- datos[trainIndex,]
+datos_prueba <- datos[-trainIndex,]
+
+datos_entrenamiento$compro <- as.factor(datos_entrenamiento$compro)
+datos_prueba$compro <- as.factor(datos_prueba$compro)
+
+library(randomForest)
+library(rpart)
+
+log_model <- glm(compro ~ ., data = datos_entrenamiento, family = binomial)
+rf_model <- randomForest(compro ~ ., data = datos_entrenamiento)
+tree_model <- rpart(compro ~ ., data = datos_entrenamiento, method = "class")
+
+library(pROC)
+
+log_pred <- predict(log_model, datos_prueba, type = "response")
+log_roc <- roc(datos_prueba$compro, log_pred)
+log_auc <- auc(log_roc)
+
+rf_pred <- predict(rf_model, datos_prueba, type = "prob")[,2]
+rf_roc <- roc(datos_prueba$compro, rf_pred)
+rf_auc <- auc(rf_roc)
+
+tree_pred <- predict(tree_model, datos_prueba, type = "prob")[,2]
+tree_roc <- roc(datos_prueba$compro, tree_pred)
+tree_auc <- auc(tree_roc)
+
+rf_pred_class <- ifelse(rf_pred > 0.5, 1, 0)
+tree_pred_class <- ifelse(tree_pred > 0.5, 1, 0)
+
+rf_conf_matrix <- confusionMatrix(as.factor(rf_pred_class), datos_prueba$compro)
+tree_conf_matrix <- confusionMatrix(as.factor(tree_pred_class), datos_prueba$compro)
+
+metricas_rf <- rf_conf_matrix$byClass
+metricas_arbol <- tree_conf_matrix$byClass
+
+log_pred_class <- ifelse(log_pred > 0.5, 1, 0)
+log_conf_matrix <- confusionMatrix(as.factor(log_pred_class), datos_prueba$compro)
+metricas_log <- log_conf_matrix$byClass
+
+metricas <- data.frame(
+  Modelo = c("Random Forest", "Árbol de Decisión", "Regresión Logística"),
+  Precisión = c(metricas_rf["Precision"], metricas_arbol["Precision"], metricas_log["Precision"]),
+  Sensibilidad = c(metricas_rf["Sensitivity"], metricas_arbol["Sensitivity"], metricas_log["Sensitivity"]),
+  Especificidad = c(metricas_rf["Specificity"], metricas_arbol["Specificity"], metricas_log["Specificity"])
+)
+
+print(metricas)
+
+model_aucs <- data.frame(
+  Modelo = c("Regresión Logística", "Random Forest", "Árbol de Decisión"),
+  AUC = c(log_auc, rf_auc, tree_auc)
+)
+
+print(model_aucs)
+
+library(ggplot2)
+ggplot(model_aucs, aes(x = Modelo, y = AUC, fill = Modelo)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Comparación de AUC entre Modelos", x = "Modelo", y = "AUC") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+library(reshape2)
+metricas_long <- reshape2::melt(metricas, id.vars = "Modelo", variable.name = "Métrica", value.name = "Valor")
+
+ggplot(metricas_long, aes(x = Modelo, y = Valor, fill = Métrica)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal() +
+  labs(title = "Comparación de Métricas entre Modelos", x = "Modelo", y = "Valor") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
